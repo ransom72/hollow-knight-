@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hollow Knight — Unity WebGL</title>
+  <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/aukak/hollow-knight@2fc2e7149f0d5b2609b135ab48f00fd973930635/TemplateData/favicon.ico">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aukak/hollow-knight@2fc2e7149f0d5b2609b135ab48f00fd973930635/TemplateData/style.css">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #231f20; }
+    #unity-container { position: fixed; inset: 0; width: 100%; height: 100%; }
+    #unity-canvas { display: block; width: 100%; height: 100%; }
+    #loading-text { position: fixed; inset: 18px 0 auto; z-index: 2; color: white; font: 24px sans-serif; text-align: center; }
+    #unity-loading-bar { display: none; }
+  </style>
+</head>
+<body>
+  <div id="loading-text">Loading game files…</div>
+  <div id="unity-container" class="unity-desktop">
+    <canvas id="unity-canvas"></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty"><div id="unity-progress-bar-full"></div></div>
+    </div>
+    <div id="unity-mobile-warning">WebGL builds are not supported on mobile devices.</div>
+  </div>
+  <script>
+    const assetBase = "https://cdn.jsdelivr.net/gh/aukak/hollow-knight@2fc2e7149f0d5b2609b135ab48f00fd973930635/";
+    const loadingText = document.getElementById("loading-text");
+    let loadedBytes = 0;
+
+    async function fetchPart(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Could not load ${url} (${response.status})`);
+      const buffer = await response.arrayBuffer();
+      loadedBytes += buffer.byteLength;
+      loadingText.textContent = `Loading game files… ${(loadedBytes / 1048576).toFixed(1)} MB downloaded`;
+      return buffer;
+    }
+
+    async function mergeParts(file, count) {
+      const parts = await Promise.all(
+        Array.from({ length: count }, (_, i) => fetchPart(`${assetBase}Build/${file}.part${i + 1}`))
+      );
+      return URL.createObjectURL(new Blob(parts));
+    }
+
+    (async () => {
+      try {
+        const [dataUrl, wasmUrl] = await Promise.all([
+          mergeParts("hktruffled.data", 45),
+          mergeParts("hktruffled.wasm", 2)
+        ]);
+        const canvas = document.getElementById("unity-canvas");
+        const loadingBar = document.getElementById("unity-loading-bar");
+        const progressBar = document.getElementById("unity-progress-bar-full");
+        const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        const config = {
+          dataUrl,
+          frameworkUrl: `${assetBase}Build/hktruffled.framework.js`,
+          codeUrl: wasmUrl,
+          streamingAssetsUrl: `${assetBase}StreamingAssets`,
+          companyName: "Team Cherry & Truffled",
+          productName: "Hollow Knight",
+          productVersion: "1.1",
+          ...(mobile ? { devicePixelRatio: 1 } : {})
+        };
+        if (mobile) document.getElementById("unity-container").className = "unity-mobile";
+        else {
+          const resize = () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+          };
+          resize();
+          window.addEventListener("resize", resize);
+        }
+        loadingBar.style.display = "block";
+        const loader = document.createElement("script");
+        loader.src = `${assetBase}Build/hktruffled.loader.js`;
+        loader.onload = () => {
+          createUnityInstance(canvas, config, progress => {
+            progressBar.style.width = `${100 * progress}%`;
+          }).then(() => {
+            loadingText.remove();
+            loadingBar.style.display = "none";
+          }).catch(error => {
+            loadingText.textContent = `Game failed to start: ${error}`;
+          });
+        };
+        loader.onerror = () => { loadingText.textContent = "Could not load the Unity game loader."; };
+        document.body.appendChild(loader);
+      } catch (error) {
+        loadingText.textContent = `Could not load game files: ${error.message}`;
+      }
+    })();
+  </script>
+</body>
+</html>
